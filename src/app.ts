@@ -12,7 +12,7 @@ app.use(express.json());
 // ===========================
 // Routes
 // ===========================
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+// app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use("/admin", adminRoutes);   // /admin/products
 app.use("/user", userRoutes);         // /signup, /login
 

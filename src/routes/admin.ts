@@ -2,17 +2,19 @@ import { Router, Request, Response } from "express";
 import { PrismaClient } from "../../generated/prisma";
 import { authenticateAdmin } from "../middleware/auth";
 import multer from "multer";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import cloudinary, { upload } from "../utils/cloudinary";
 import path from "path";
 
 const prisma = new PrismaClient();
 const router = Router();
 
 // Multer setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, "../../uploads")),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-});
-const upload = multer({ storage });
+// const storage = multer.diskStorage({
+//   destination: (req, file, cb) => cb(null, path.join(__dirname, "../../uploads")),
+//   filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
+// });
+// const upload = multer({ storage });
 
 // GET ALL PRODUCTS
 router.get("/products", authenticateAdmin, async (_req: Request, res: Response) => {
@@ -61,61 +63,128 @@ router.get("/products/:id", authenticateAdmin, async (req: Request, res: Respons
 //   }
 // });
 
-router.post("/products", authenticateAdmin, async (req: Request, res: Response) => {
-  try {
-    const { code, name, description, originalPrice, salePrice, image } = req.body;
+router.post(
+  "/products",
+  authenticateAdmin,
+  upload.single("image"), // "image" là tên field trong form-data
+  async (req: Request, res: Response) => {
+    try {
+      const { code, name, description, originalPrice, salePrice } = req.body;
 
-    const product = await prisma.product.create({
-      data: {
-        code,
-        name,
-        description,
-        image,
-        originalPrice: Number(originalPrice),
-        salePrice: Number(salePrice) || 0,
-        onSaleFlag: salePrice != null && Number(salePrice) > 0 && Number(salePrice) < Number(originalPrice),
-      },
-    });
-    res.status(201).json({ product });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
+      // ✅ CloudinaryStorage gắn URL ảnh tại req.file.path
+      const file = req.file as Express.Multer.File & { path?: string; url?: string };
+      const imageUrl = file?.path || file?.url || null;
+
+      // ✅ Kiểm tra dữ liệu đầu vào
+      if (!code || !name || !originalPrice) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+
+      // 🧠 Tạo sản phẩm mới trong database
+      const product = await prisma.product.create({
+        data: {
+          code,
+          name,
+          description,
+          image: imageUrl,
+          originalPrice: Number(originalPrice),
+          salePrice: Number(salePrice) || 0,
+          onSaleFlag:
+            !!salePrice &&
+            Number(salePrice) > 0 &&
+            Number(salePrice) < Number(originalPrice),
+        },
+      });
+
+      res.status(201).json({ product });
+    } catch (err) {
+      console.error("❌ Error creating product:", err);
+      res.status(500).json({
+        message: err instanceof Error ? err.message : "Server error",
+      });
+    }
   }
-});
-
+);
 
 // UPDATE PRODUCT
-router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
-  try {
-    const existing = await prisma.product.findUnique({ where: { id: Number(req.params.id) } });
-    if (!existing) return res.status(404).json({ message: "Product not found" });
+// router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
+//   try {
+//     const existing = await prisma.product.findUnique({ where: { id: Number(req.params.id) } });
+//     if (!existing) return res.status(404).json({ message: "Product not found" });
 
-    const { code, name, description, originalPrice, salePrice } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : existing.image;
+//     const { code, name, description, originalPrice, salePrice } = req.body;
+//     const image = req.file ? `/uploads/${req.file.filename}` : existing.image;
 
-    const updated = await prisma.product.update({
-      where: { id: Number(req.params.id) },
-      data: {
-        code: code ?? existing.code,
-        name: name ?? existing.name,
-        description: description ?? existing.description,
-        image,
-        originalPrice: originalPrice ? Number(originalPrice) : existing.originalPrice,
-        salePrice: salePrice ? Number(salePrice) : existing.salePrice,
-        onSaleFlag:
-          (salePrice ? Number(salePrice) : existing.salePrice) > 0 &&
-          (originalPrice ? Number(originalPrice) : existing.originalPrice) >
-            (salePrice ? Number(salePrice) : existing.salePrice),
-      },
-    });
-    res.json({ product: updated });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+//     const updated = await prisma.product.update({
+//       where: { id: Number(req.params.id) },
+//       data: {
+//         code: code ?? existing.code,
+//         name: name ?? existing.name,
+//         description: description ?? existing.description,
+//         image,
+//         originalPrice: originalPrice ? Number(originalPrice) : existing.originalPrice,
+//         salePrice: salePrice ? Number(salePrice) : existing.salePrice,
+//         onSaleFlag:
+//           (salePrice ? Number(salePrice) : existing.salePrice) > 0 &&
+//           (originalPrice ? Number(originalPrice) : existing.originalPrice) >
+//             (salePrice ? Number(salePrice) : existing.salePrice),
+//       },
+//     });
+//     res.json({ product: updated });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+router.put(
+  "/products/:id",
+  authenticateAdmin,
+  upload.single("image"), // "image" là field trong form-data
+  async (req: Request, res: Response) => {
+    try {
+      const productId = Number(req.params.id);
+
+      // 🧠 Kiểm tra sản phẩm có tồn tại
+      const existing = await prisma.product.findUnique({ where: { id: productId } });
+      if (!existing) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+
+      const { code, name, description, originalPrice, salePrice } = req.body;
+
+      // 🟢 CloudinaryStorage trả URL tại req.file.path
+      const file = req.file as Express.Multer.File & { path?: string; url?: string };
+      const imageUrl = file?.path || file?.url || existing.image;
+
+      // 🧩 Cập nhật dữ liệu sản phẩm
+      const updated = await prisma.product.update({
+        where: { id: productId },
+        data: {
+          code: code ?? existing.code,
+          name: name ?? existing.name,
+          description: description ?? existing.description,
+          image: imageUrl,
+          originalPrice: originalPrice ? Number(originalPrice) : existing.originalPrice,
+          salePrice: salePrice ? Number(salePrice) : existing.salePrice,
+          onSaleFlag:
+            (salePrice ? Number(salePrice) : existing.salePrice) > 0 &&
+            (originalPrice ? Number(originalPrice) : existing.originalPrice) >
+              (salePrice ? Number(salePrice) : existing.salePrice),
+        },
+      });
+
+      res.json({ product: updated });
+    } catch (err) {
+      console.error("❌ Error updating product:", err);
+      res.status(500).json({
+        message: err instanceof Error ? err.message : "Server error",
+      });
+    }
   }
-});
+);
 
-// DELETE PRODUCT
+
 // DELETE PRODUCT
 router.delete("/products/:id", authenticateAdmin, async (req: Request, res: Response) => {
   try {
@@ -183,3 +252,4 @@ router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
 
 
 export default router;
+
