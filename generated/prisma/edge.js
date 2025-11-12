@@ -207,16 +207,17 @@ const config = {
     "db"
   ],
   "activeProvider": "postgresql",
+  "postinstall": false,
   "inlineDatasources": {
     "db": {
       "url": {
-        "fromEnvVar": "POSTGRES_URL",
+        "fromEnvVar": "DATABASE_URL",
         "value": null
       }
     }
   },
-  "inlineSchema": "generator client {\n  provider = \"prisma-client-js\"\n  output   = \"../generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"POSTGRES_URL\")\n}\n\nmodel User {\n  id        Int      @id @default(autoincrement())\n  email     String   @unique\n  username  String\n  password  String\n  isAdmin   Boolean  @default(false)\n  createdAt DateTime @default(now())\n  carts     Cart[]\n  orders    Order[]\n}\n\nmodel Product {\n  id            Int         @id @default(autoincrement())\n  code          String      @unique\n  name          String\n  image         String?\n  description   String?\n  originalPrice Float\n  salePrice     Float       @default(0)\n  onSaleFlag    Boolean     @default(false)\n  createdAt     DateTime    @default(now())\n  carts         Cart[]\n  orderItems    OrderItem[]\n}\n\nmodel Cart {\n  id        Int      @id @default(autoincrement())\n  userId    Int\n  productId Int\n  quantity  Int      @default(1)\n  createdAt DateTime @default(now())\n  product   Product  @relation(fields: [productId], references: [id])\n  user      User     @relation(fields: [userId], references: [id])\n}\n\nmodel Order {\n  id          Int         @id @default(autoincrement())\n  userId      Int\n  status      OrderStatus @default(PENDING)\n  totalAmount Float       @default(0)\n  createdAt   DateTime    @default(now())\n  updatedAt   DateTime    @updatedAt\n  user        User        @relation(fields: [userId], references: [id])\n  items       OrderItem[]\n}\n\nmodel OrderItem {\n  id        Int      @id @default(autoincrement())\n  orderId   Int\n  productId Int\n  quantity  Int      @default(1)\n  price     Float\n  createdAt DateTime @default(now())\n  order     Order    @relation(fields: [orderId], references: [id])\n  product   Product  @relation(fields: [productId], references: [id])\n}\n\nenum OrderStatus {\n  PENDING\n  DELIVERING\n  CANCELLED\n  DONE\n}\n",
-  "inlineSchemaHash": "440607ec5addf7ba08483f1031aca52fe32cc85bd7bac023b33a51a54647c768",
+  "inlineSchema": "generator client {\n  provider = \"prisma-client-js\"\n  output   = \"../generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\nmodel User {\n  id        Int      @id @default(autoincrement())\n  email     String   @unique\n  username  String\n  password  String\n  isAdmin   Boolean  @default(false)\n  createdAt DateTime @default(now())\n  carts     Cart[]\n  orders    Order[]\n}\n\nmodel Product {\n  id            Int         @id @default(autoincrement())\n  code          String      @unique\n  name          String\n  image         String?\n  description   String?\n  originalPrice Float\n  salePrice     Float       @default(0)\n  onSaleFlag    Boolean     @default(false)\n  createdAt     DateTime    @default(now())\n  carts         Cart[]\n  orderItems    OrderItem[]\n}\n\nmodel Cart {\n  id        Int      @id @default(autoincrement())\n  userId    Int\n  productId Int\n  quantity  Int      @default(1)\n  createdAt DateTime @default(now())\n  product   Product  @relation(fields: [productId], references: [id])\n  user      User     @relation(fields: [userId], references: [id])\n}\n\nmodel Order {\n  id          Int         @id @default(autoincrement())\n  userId      Int\n  status      OrderStatus @default(PENDING)\n  totalAmount Float       @default(0)\n  createdAt   DateTime    @default(now())\n  updatedAt   DateTime    @updatedAt\n  user        User        @relation(fields: [userId], references: [id])\n  items       OrderItem[]\n}\n\nmodel OrderItem {\n  id        Int      @id @default(autoincrement())\n  orderId   Int\n  productId Int\n  quantity  Int      @default(1)\n  price     Float\n  createdAt DateTime @default(now())\n  order     Order    @relation(fields: [orderId], references: [id])\n  product   Product  @relation(fields: [productId], references: [id])\n}\n\nenum OrderStatus {\n  PENDING\n  DELIVERING\n  CANCELLED\n  DONE\n}\n",
+  "inlineSchemaHash": "59ce6871a76070e77b4a7f53cfd1e99ca2c484e0b97712c8dfbe62a195c9354a",
   "copyEngine": true
 }
 config.dirname = '/'
@@ -228,7 +229,7 @@ config.compilerWasm = undefined
 
 config.injectableEdgeEnv = () => ({
   parsed: {
-    POSTGRES_URL: typeof globalThis !== 'undefined' && globalThis['POSTGRES_URL'] || typeof process !== 'undefined' && process.env && process.env.POSTGRES_URL || undefined
+    DATABASE_URL: typeof globalThis !== 'undefined' && globalThis['DATABASE_URL'] || typeof process !== 'undefined' && process.env && process.env.DATABASE_URL || undefined
   }
 })
 
