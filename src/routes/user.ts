@@ -176,14 +176,12 @@ router.put("/cart/:productId", authenticateUser, async (req: any, res) => {
       return res.status(400).json({ message: "Quantity is required and must be greater than 0" });
     }
 
-    // Cập nhật 1 cart item duy nhất
     // Update product quantity
     await prisma.cart.updateMany({
       where: { userId, productId },
       data: { quantity }
     });
 
-    // Lấy cart item sau update
     const cartItem = await prisma.cart.findFirst({
       where: { userId, productId },
       include: { product: true },
@@ -221,7 +219,6 @@ router.post("/cart/checkout", authenticateUser, async (req: any, res) => {
   try {
     const userId = req.user.userId;
 
-    // 1️⃣ Lấy danh sách sản phẩm trong giỏ
     const cartItems = await prisma.cart.findMany({
       where: { userId },
       include: { product: true },
@@ -230,8 +227,6 @@ router.post("/cart/checkout", authenticateUser, async (req: any, res) => {
     if (cartItems.length === 0) {
       return res.status(400).json({ message: "Cart is empty" });
     }
-
-    // 2️⃣ Tính tổng tiền
     const totalAmount = cartItems.reduce((sum, item) => {
       const price = item.product.onSaleFlag
         ? item.product.salePrice
@@ -239,7 +234,6 @@ router.post("/cart/checkout", authenticateUser, async (req: any, res) => {
       return sum + price * item.quantity;
     }, 0);
 
-    // 3️⃣ Tạo đơn hàng
     const order = await prisma.order.create({
       data: {
         userId,
@@ -305,7 +299,7 @@ router.delete("/orders/:orderId", authenticateUser, async (req: any, res) => {
     const userId = req.user.userId;
     const orderId = parseInt(req.params.orderId);
 
-    // Lấy order
+ 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true },
@@ -314,15 +308,13 @@ router.delete("/orders/:orderId", authenticateUser, async (req: any, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" });
     if (order.userId !== userId) return res.status(403).json({ message: "Forbidden" });
 
-    // Chỉ cho phép xoá DONE hoặc CANCELLED
     if (!["DONE", "CANCELLED"].includes(order.status)) {
       return res.status(400).json({ message: "Cannot delete order in current status" });
     }
 
-    // Xoá tất cả order items
     await prisma.orderItem.deleteMany({ where: { orderId } });
 
-    // Xoá order
+  
     await prisma.order.delete({ where: { id: orderId } });
 
     res.json({ message: "Order deleted successfully" });
