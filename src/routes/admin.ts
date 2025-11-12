@@ -38,10 +38,32 @@ router.get("/products/:id", authenticateAdmin, async (req: Request, res: Respons
 });
 
 // CREATE PRODUCT
-router.post("/products", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
+// router.post("/products", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
+//   try {
+//     const { code, name, description, originalPrice, salePrice } = req.body;
+//     const image = req.file ? `/uploads/${req.file.filename}` : null;
+
+//     const product = await prisma.product.create({
+//       data: {
+//         code,
+//         name,
+//         description,
+//         image,
+//         originalPrice: Number(originalPrice),
+//         salePrice: Number(salePrice) || 0,
+//         onSaleFlag: salePrice != null && Number(salePrice) > 0 && Number(salePrice) < Number(originalPrice),
+//       },
+//     });
+//     res.status(201).json({ product });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+router.post("/products", authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    const { code, name, description, originalPrice, salePrice } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
+    const { code, name, description, originalPrice, salePrice, image } = req.body;
 
     const product = await prisma.product.create({
       data: {
@@ -57,9 +79,10 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req: 
     res.status(201).json({ product });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
   }
 });
+
 
 // UPDATE PRODUCT
 router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
