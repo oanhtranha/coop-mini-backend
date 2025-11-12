@@ -93,15 +93,24 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
 });
 
 // DELETE PRODUCT
+// DELETE PRODUCT
 router.delete("/products/:id", authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    await prisma.product.delete({ where: { id: Number(req.params.id) } });
+    const productId = Number(req.params.id);
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    await prisma.product.delete({ where: { id: productId } });
     res.json({ message: "Product deleted" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 // ===========================
 // Order management
 // ===========================
