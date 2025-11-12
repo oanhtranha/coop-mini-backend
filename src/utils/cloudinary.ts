@@ -1,6 +1,8 @@
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
+import path from "path";
+
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
@@ -8,17 +10,20 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET!,
 });
 
-// 🧩 Tạo storage Cloudinary cho multer
 const storage = new CloudinaryStorage({
   cloudinary,
-  params: async (req, file) =>
-    ({
-      folder: "coopmini-products", // ✅ không còn lỗi TS nhờ 'as any'
+  params: async (req, file) => {
+    const ext = path.extname(file.originalname); // ".png"
+    const name = path.basename(file.originalname, ext); // "milk"
+    return {
+      folder: "coopmini-products",
       allowed_formats: ["jpg", "png", "jpeg", "webp"],
-      public_id: `${Date.now()}-${file.originalname}`,
+      public_id: `${Date.now()}-${name}`, // "1762988668218-milk"
       transformation: [{ quality: "auto" }],
-    } as any), // ⚠️ thêm 'as any' để bỏ qua kiểm tra kiểu Params
+    } as any;
+  },
 });
+
 
 export const upload = multer({ storage });
 export default cloudinary;
