@@ -19,11 +19,19 @@ const router = Router();
 // });
 // const upload = multer({ storage });
 
-// ===========================
-// Multer setup for Vercel
-// ===========================
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // Giới hạn 2MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      return cb(new Error("Định dạng ảnh không hợp lệ (chỉ chấp nhận jpg, png, webp)"));
+    }
+    cb(null, true);
+  },
+});
 
 // ===========================
 // Helper: upload buffer to Cloudinary
@@ -38,10 +46,27 @@ const streamUpload = (buffer: Buffer, folder: string, filename: string) => {
       }
     );
     const readable = new Readable();
-    readable._read = () => { };
+    readable._read = () => {};
     readable.push(buffer);
     readable.push(null);
     readable.pipe(stream);
+  });
+};
+
+// ===========================
+// Middleware: handle Multer errors
+// ===========================
+const handleUpload = (req: Request, res: Response, next: Function) => {
+  upload.single("image")(req, res, (err: any) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ message: "Ảnh quá lớn, dung lượng tối đa là 2MB" });
+      }
+      return res.status(400).json({ message: `Lỗi upload file: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ message: err.message });
+    }
+    next();
   });
 };
 
@@ -185,7 +210,7 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
 // ===========================
 // CREATE PRODUCT
 // ===========================
-router.post("/products", authenticateAdmin, upload.single("image"), async (req, res) => {
+router.post("/products", authenticateAdmin, handleUpload, async (req, res) => {
   try {
     const { code, name, description, originalPrice, salePrice } = req.body;
 
@@ -199,31 +224,22 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
       return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
     }
 
-    // Upload ảnh lên Cloudinary
-    // Upload ảnh lên Cloudinary (nếu có)
     let imageUrl: string | null = null;
 
-    if (req.file && req.file.buffer) {
+    if (req.file) {
       try {
-        const result = await new Promise<any>((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            {
-              folder: "coopmini-products",
-              public_id: `${Date.now()}-${req.file!.originalname.split(".")[0]}`,
-              transformation: [{ quality: "auto" }],
-            },
-            (err, result) => (result ? resolve(result) : reject(err))
-          );
-          stream.end(req.file!.buffer);
-        });
-
+        const ext = path.extname(req.file.originalname);
+        const nameOnly = path.basename(req.file.originalname, ext);
+        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
         imageUrl = result.secure_url;
       } catch (uploadErr) {
-        console.error("❌ Upload Cloudinary error:", uploadErr);
-        return res.status(500).json({ message: "Upload ảnh thất bại" });
+        console.error("❌ Cloudinary upload error:", uploadErr);
+        return res.status(500).json({
+          message: "Không thể upload ảnh. Vui lòng chọn ảnh nhỏ hơn 2MB.",
+          error: uploadErr instanceof Error ? uploadErr.message : uploadErr,
+        });
       }
     }
-
 
     const product = await prisma.product.create({
       data: {
@@ -243,14 +259,14 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
     res.status(201).json({ product });
   } catch (err) {
     console.error("❌ Error creating product:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
   }
 });
 
 // ===========================
 // UPDATE PRODUCT
 // ===========================
-router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req, res) => {
+router.put("/products/:id", authenticateAdmin, handleUpload, async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const existing = await prisma.product.findUnique({ where: { id: productId } });
@@ -263,42 +279,22 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
       if (codeExists) return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
     }
 
-    // Upload ảnh mới nếu có
     let imageUrl = existing.image;
     if (req.file) {
       try {
-        let imageUrl: string | null = null;
+        const ext = path.extname(req.file.originalname);
+        const nameOnly = path.basename(req.file.originalname, ext);
+        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
+        imageUrl = result.secure_url;
 
-        if (req.file?.buffer) {
-          try {
-            const result = await new Promise<any>((resolve, reject) => {
-              const stream = cloudinary.uploader.upload_stream(
-                {
-                  folder: "coopmini-products",
-                  public_id: `${Date.now()}-${req.file!.originalname.split(".")[0]}`,
-                  transformation: [{ quality: "auto" }],
-                },
-                (err, result) => (result ? resolve(result) : reject(err))
-              );
-              stream.end(req.file!.buffer);
-            });
-
-            imageUrl = result.secure_url;
-          } catch (uploadErr) {
-            console.error("❌ Upload Cloudinary error:", uploadErr);
-            return res.status(500).json({ message: "Upload ảnh thất bại" });
-          }
-        }
-
-
-        // Xóa ảnh cũ trên Cloudinary
+        // Xóa ảnh cũ
         if (existing.image?.includes("cloudinary.com")) {
           const publicId = existing.image.split("/").slice(-1)[0]?.split(".")[0];
           if (publicId) await cloudinary.uploader.destroy(`coopmini-products/${publicId}`);
         }
       } catch (uploadErr) {
-        console.error("❌ Upload Cloudinary error:", uploadErr);
-        return res.status(500).json({ message: "Upload ảnh thất bại" });
+        console.error("❌ Cloudinary upload error:", uploadErr);
+        return res.status(500).json({ message: "Không thể upload ảnh mới" });
       }
     }
 
@@ -324,7 +320,6 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 // ===========================
 // DELETE PRODUCT
