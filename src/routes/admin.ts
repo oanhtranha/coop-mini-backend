@@ -87,18 +87,13 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
         const nameOnly = path.basename(req.file.originalname, ext);
         const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
         imageUrl = result.secure_url;
-      } catch (uploadErr: any) {
-        console.error("❌ Cloudinary upload error:", uploadErr);
-
-        if (uploadErr?.http_code === 400 || uploadErr?.http_code === 413) {
-          return res.status(400).json({ message: "Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn 2MB" });
-        }
-
-        return res.status(500).json({
-          message: "Không thể upload ảnh lên Cloudinary",
-          error: uploadErr.message || "Lỗi không xác định",
-        });
-      }
+      }  catch (uploadErr) {
+    console.error("❌ Upload Cloudinary error:", uploadErr);
+    return res.status(500).json({
+      message: "Upload ảnh thất bại",
+      error: uploadErr instanceof Error ? uploadErr.message : uploadErr,
+    });
+  }
     }
 
     const product = await prisma.product.create({
@@ -258,3 +253,5 @@ router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
 });
 
 export default router;
+
+
