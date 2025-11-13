@@ -6,6 +6,8 @@ import { CloudinaryStorage } from "multer-storage-cloudinary";
 import cloudinary from "../utils/cloudinary";
 import path from "path";
 import { Readable } from "stream";
+import express from "express";
+
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -36,7 +38,7 @@ const streamUpload = (buffer: Buffer, folder: string, filename: string) => {
       }
     );
     const readable = new Readable();
-    readable._read = () => {};
+    readable._read = () => { };
     readable.push(buffer);
     readable.push(null);
     readable.pipe(stream);
@@ -180,6 +182,70 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
     res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
   }
 });
+// ===========================
+// CREATE PRODUCT
+// ===========================
+router.post("/products", authenticateAdmin, upload.single("image"), async (req, res) => {
+  try {
+    const { code, name, description, originalPrice, salePrice } = req.body;
+
+    if (!code || !name || !originalPrice) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // Kiểm tra trùng mã
+    const existingCode = await prisma.product.findUnique({ where: { code } });
+    if (existingCode) {
+      return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
+    }
+
+    // Upload ảnh lên Cloudinary
+    // Upload ảnh lên Cloudinary (nếu có)
+    let imageUrl: string | null = null;
+
+    if (req.file && req.file.buffer) {
+      try {
+        const result = await new Promise<any>((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: "coopmini-products",
+              public_id: `${Date.now()}-${req.file!.originalname.split(".")[0]}`,
+              transformation: [{ quality: "auto" }],
+            },
+            (err, result) => (result ? resolve(result) : reject(err))
+          );
+          stream.end(req.file!.buffer);
+        });
+
+        imageUrl = result.secure_url;
+      } catch (uploadErr) {
+        console.error("❌ Upload Cloudinary error:", uploadErr);
+        return res.status(500).json({ message: "Upload ảnh thất bại" });
+      }
+    }
+
+
+    const product = await prisma.product.create({
+      data: {
+        code,
+        name,
+        description,
+        image: imageUrl,
+        originalPrice: Number(originalPrice),
+        salePrice: Number(salePrice) || 0,
+        onSaleFlag:
+          !!salePrice &&
+          Number(salePrice) > 0 &&
+          Number(salePrice) < Number(originalPrice),
+      },
+    });
+
+    res.status(201).json({ product });
+  } catch (err) {
+    console.error("❌ Error creating product:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 // ===========================
 // UPDATE PRODUCT
@@ -192,32 +258,47 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
 
     const { code, name, description, originalPrice, salePrice } = req.body;
 
-    // Kiểm tra code trùng nếu thay đổi
     if (code && code !== existing.code) {
       const codeExists = await prisma.product.findUnique({ where: { code } });
       if (codeExists) return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
     }
 
-    // Upload file mới nếu có
+    // Upload ảnh mới nếu có
     let imageUrl = existing.image;
     if (req.file) {
-      if (!req.file.buffer || req.file.buffer.length === 0) {
-        return res.status(400).json({ message: "File is empty" });
-      }
       try {
-        const ext = path.extname(req.file.originalname);
-        const nameOnly = path.basename(req.file.originalname, ext);
-        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
-        imageUrl = result.secure_url;
+        let imageUrl: string | null = null;
 
-        // Xóa ảnh cũ trên Cloudinary nếu cần
-        if (existing.image && existing.image.includes("cloudinary.com")) {
-          const publicId = existing.image.split("/").pop()?.split(".")[0];
+        if (req.file?.buffer) {
+          try {
+            const result = await new Promise<any>((resolve, reject) => {
+              const stream = cloudinary.uploader.upload_stream(
+                {
+                  folder: "coopmini-products",
+                  public_id: `${Date.now()}-${req.file!.originalname.split(".")[0]}`,
+                  transformation: [{ quality: "auto" }],
+                },
+                (err, result) => (result ? resolve(result) : reject(err))
+              );
+              stream.end(req.file!.buffer);
+            });
+
+            imageUrl = result.secure_url;
+          } catch (uploadErr) {
+            console.error("❌ Upload Cloudinary error:", uploadErr);
+            return res.status(500).json({ message: "Upload ảnh thất bại" });
+          }
+        }
+
+
+        // Xóa ảnh cũ trên Cloudinary
+        if (existing.image?.includes("cloudinary.com")) {
+          const publicId = existing.image.split("/").slice(-1)[0]?.split(".")[0];
           if (publicId) await cloudinary.uploader.destroy(`coopmini-products/${publicId}`);
         }
       } catch (uploadErr) {
-        console.error("❌ Cloudinary upload error:", uploadErr);
-        return res.status(500).json({ message: "Upload file failed", error: uploadErr instanceof Error ? uploadErr.message : uploadErr });
+        console.error("❌ Upload Cloudinary error:", uploadErr);
+        return res.status(500).json({ message: "Upload ảnh thất bại" });
       }
     }
 
@@ -233,16 +314,17 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
         onSaleFlag:
           (salePrice ? Number(salePrice) : existing.salePrice) > 0 &&
           (originalPrice ? Number(originalPrice) : existing.originalPrice) >
-            (salePrice ? Number(salePrice) : existing.salePrice),
+          (salePrice ? Number(salePrice) : existing.salePrice),
       },
     });
 
     res.json({ product: updated });
   } catch (err) {
     console.error("❌ Error updating product:", err);
-    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
+    res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // ===========================
 // DELETE PRODUCT
