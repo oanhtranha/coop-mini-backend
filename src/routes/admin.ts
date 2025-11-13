@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "../../generated/prisma";
 import { authenticateAdmin } from "../middleware/auth";
-import { upload } from "../utils/cloudinary";
+import { safeUpload } from "../middleware/safeUpload";
 import cloudinary from "../utils/cloudinary";
 
 const prisma = new PrismaClient();
@@ -38,15 +38,14 @@ router.get("/products/:id", authenticateAdmin, async (req, res) => {
 });
 
 // CREATE PRODUCT
-router.post("/products", authenticateAdmin, upload.single("image"), async (req, res) => {
+router.post("/products", authenticateAdmin, safeUpload("image"), async (req, res) => {
   try {
     const { code, name, description, originalPrice, salePrice } = req.body;
 
     if (!code || !name || !originalPrice) {
-      return res.status(400).json({ message: "Missing required fields" });
+      return res.status(400).json({ message: "Thiếu thông tin bắt buộc" });
     }
 
-    // Kiểm tra trùng mã
     const existingCode = await prisma.product.findUnique({ where: { code } });
     if (existingCode) {
       return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
@@ -72,16 +71,16 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
     res.status(201).json({ product });
   } catch (err) {
     console.error("❌ Error creating product:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Lỗi server khi tạo sản phẩm" });
   }
 });
 
 // UPDATE PRODUCT
-router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req, res) => {
+router.put("/products/:id", authenticateAdmin, safeUpload("image"), async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const existing = await prisma.product.findUnique({ where: { id: productId } });
-    if (!existing) return res.status(404).json({ message: "Product not found" });
+    if (!existing) return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
 
     const { code, name, description, originalPrice, salePrice } = req.body;
 
@@ -90,7 +89,6 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
       if (codeExists) return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
     }
 
-    // Upload ảnh mới nếu có
     let imageUrl = existing.image;
     if (req.file) {
       const uploaded = (req.file as any).path || (req.file as any).url;
@@ -122,7 +120,7 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
     res.json({ product: updated });
   } catch (err) {
     console.error("❌ Error updating product:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Lỗi server khi cập nhật sản phẩm" });
   }
 });
 
@@ -131,7 +129,7 @@ router.delete("/products/:id", authenticateAdmin, async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    if (!product) return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
 
     if (product.image && product.image.includes("cloudinary.com")) {
       const publicId = product.image.split("/").pop()?.split(".")[0];
@@ -139,10 +137,10 @@ router.delete("/products/:id", authenticateAdmin, async (req, res) => {
     }
 
     await prisma.product.delete({ where: { id: productId } });
-    res.json({ message: "Product deleted" });
+    res.json({ message: "Đã xóa sản phẩm" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Lỗi server khi xóa sản phẩm" });
   }
 });
 
@@ -151,7 +149,6 @@ router.delete("/products/:id", authenticateAdmin, async (req, res) => {
 // ORDER MANAGEMENT
 // ===========================
 
-// Get all orders
 router.get("/orders", authenticateAdmin, async (_req, res) => {
   try {
     const orders = await prisma.order.findMany({
@@ -173,14 +170,13 @@ router.get("/orders", authenticateAdmin, async (_req, res) => {
   }
 });
 
-// Update order status
 router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body; // DELIVERING / DONE / CANCELLED
+    const { status } = req.body;
 
     if (!["DELIVERING", "DONE", "CANCELLED"].includes(status)) {
-      return res.status(400).json({ message: "Invalid status" });
+      return res.status(400).json({ message: "Trạng thái không hợp lệ" });
     }
 
     const updatedOrder = await prisma.order.update({
@@ -188,7 +184,7 @@ router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
       data: { status },
     });
 
-    res.json({ message: "Order status updated", order: updatedOrder });
+    res.json({ message: "Cập nhật trạng thái đơn hàng thành công", order: updatedOrder });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });

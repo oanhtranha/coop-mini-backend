@@ -2,7 +2,7 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 
-// Cloudinary config (dùng biến môi trường)
+// Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
   api_key: process.env.CLOUDINARY_API_KEY!,
@@ -10,7 +10,7 @@ cloudinary.config({
   secure: true,
 });
 
-// Multer + Cloudinary Storage (tự động upload trực tiếp)
+// Cloudinary storage config
 const storage = new CloudinaryStorage({
   cloudinary,
   params: (req, file) => {
@@ -20,15 +20,15 @@ const storage = new CloudinaryStorage({
       folder: "coopmini-products",
       allowed_formats: ["jpg", "jpeg", "png", "webp"],
       public_id: `${timestamp}-${originalName}`,
-      transformation: [{ quality: "auto" }],
+      transformation: [{ width: 1200, crop: "limit", quality: "auto" }], // resize nhẹ để tối ưu
     };
   },
 });
 
-// Export Multer upload (giới hạn 5MB)
+// Multer upload config
 export const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 }, // Giới hạn 5MB
 });
 
 export default cloudinary;
