@@ -3,8 +3,9 @@ import { PrismaClient } from "../../generated/prisma";
 import { authenticateAdmin } from "../middleware/auth";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
-import cloudinary, { upload } from "../utils/cloudinary";
+import cloudinary from "../utils/cloudinary";
 import path from "path";
+import { Readable } from "stream";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -15,6 +16,32 @@ const router = Router();
 //   filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
 // });
 // const upload = multer({ storage });
+
+// ===========================
+// Multer setup for Vercel
+// ===========================
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+// ===========================
+// Helper: upload buffer to Cloudinary
+// ===========================
+const streamUpload = (buffer: Buffer, folder: string, filename: string) => {
+  return new Promise<any>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, public_id: filename, transformation: [{ quality: "auto" }] },
+      (error, result) => {
+        if (result) resolve(result);
+        else reject(error);
+      }
+    );
+    const readable = new Readable();
+    readable._read = () => {};
+    readable.push(buffer);
+    readable.push(null);
+    readable.pipe(stream);
+  });
+};
 
 // GET ALL PRODUCTS
 router.get("/products", authenticateAdmin, async (_req: Request, res: Response) => {
@@ -98,19 +125,38 @@ router.get("/products/:id", authenticateAdmin, async (req: Request, res: Respons
 // ===========================
 // Product management
 // ===========================
+// ===========================
 // CREATE PRODUCT
+// ===========================
 router.post("/products", authenticateAdmin, upload.single("image"), async (req, res) => {
   try {
     const { code, name, description, originalPrice, salePrice } = req.body;
-    const imageUrl = (req.file as any)?.path ?? null;
 
     if (!code || !name || !originalPrice) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // Kiểm tra code trùng
     const existingCode = await prisma.product.findUnique({ where: { code } });
     if (existingCode) {
-      return res.status(400).json({ message: "Product code already exists" });
+      return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
+    }
+
+    // Upload file nếu có
+    let imageUrl: string | null = null;
+    if (req.file) {
+      if (!req.file.buffer || req.file.buffer.length === 0) {
+        return res.status(400).json({ message: "File is empty" });
+      }
+      try {
+        const ext = path.extname(req.file.originalname);
+        const nameOnly = path.basename(req.file.originalname, ext);
+        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
+        imageUrl = result.secure_url;
+      } catch (uploadErr) {
+        console.error("❌ Cloudinary upload error:", uploadErr);
+        return res.status(500).json({ message: "Upload file failed", error: uploadErr instanceof Error ? uploadErr.message : uploadErr });
+      }
     }
 
     const product = await prisma.product.create({
@@ -131,31 +177,47 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
     res.status(201).json({ product });
   } catch (err) {
     console.error("❌ Error creating product:", err);
-    res.status(500).json({
-      message: err instanceof Error ? err.message : "Server error",
-    });
+    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
   }
 });
 
+// ===========================
 // UPDATE PRODUCT
+// ===========================
 router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const existing = await prisma.product.findUnique({ where: { id: productId } });
-    if (!existing) {
-      return res.status(404).json({ message: "Product not found" });
-    }
+    if (!existing) return res.status(404).json({ message: "Product not found" });
 
     const { code, name, description, originalPrice, salePrice } = req.body;
 
-    // Nếu có file mới thì upload Cloudinary
+    // Kiểm tra code trùng nếu thay đổi
+    if (code && code !== existing.code) {
+      const codeExists = await prisma.product.findUnique({ where: { code } });
+      if (codeExists) return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
+    }
+
+    // Upload file mới nếu có
     let imageUrl = existing.image;
     if (req.file) {
-      imageUrl = (req.file as any).path;
-      // Nếu có ảnh cũ thì xóa trên Cloudinary (tuỳ chọn)
-      if (existing.image && existing.image.includes("cloudinary.com")) {
-        const publicId = existing.image.split("/").pop()?.split(".")[0];
-        if (publicId) await cloudinary.uploader.destroy(`coop_mini_products/${publicId}`);
+      if (!req.file.buffer || req.file.buffer.length === 0) {
+        return res.status(400).json({ message: "File is empty" });
+      }
+      try {
+        const ext = path.extname(req.file.originalname);
+        const nameOnly = path.basename(req.file.originalname, ext);
+        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
+        imageUrl = result.secure_url;
+
+        // Xóa ảnh cũ trên Cloudinary nếu cần
+        if (existing.image && existing.image.includes("cloudinary.com")) {
+          const publicId = existing.image.split("/").pop()?.split(".")[0];
+          if (publicId) await cloudinary.uploader.destroy(`coopmini-products/${publicId}`);
+        }
+      } catch (uploadErr) {
+        console.error("❌ Cloudinary upload error:", uploadErr);
+        return res.status(500).json({ message: "Upload file failed", error: uploadErr instanceof Error ? uploadErr.message : uploadErr });
       }
     }
 
@@ -178,24 +240,22 @@ router.put("/products/:id", authenticateAdmin, upload.single("image"), async (re
     res.json({ product: updated });
   } catch (err) {
     console.error("❌ Error updating product:", err);
-    res.status(500).json({
-      message: err instanceof Error ? err.message : "Server error",
-    });
+    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
   }
 });
 
+// ===========================
 // DELETE PRODUCT
+// ===========================
 router.delete("/products/:id", authenticateAdmin, async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
+    if (!product) return res.status(404).json({ message: "Product not found" });
 
     if (product.image && product.image.includes("cloudinary.com")) {
       const publicId = product.image.split("/").pop()?.split(".")[0];
-      if (publicId) await cloudinary.uploader.destroy(`coop_mini_products/${publicId}`);
+      if (publicId) await cloudinary.uploader.destroy(`coopmini-products/${publicId}`);
     }
 
     await prisma.product.delete({ where: { id: productId } });
@@ -205,7 +265,6 @@ router.delete("/products/:id", authenticateAdmin, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 // ===========================
 // Order management
 // ===========================
@@ -254,3 +313,4 @@ router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
 });
 
 export default router;
+
