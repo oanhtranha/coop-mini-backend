@@ -2,36 +2,18 @@ import { Router, Request, Response } from "express";
 import { PrismaClient } from "../../generated/prisma";
 import { authenticateAdmin } from "../middleware/auth";
 import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 import cloudinary from "../utils/cloudinary";
 import path from "path";
 import { Readable } from "stream";
-import express from "express";
-
 
 const prisma = new PrismaClient();
 const router = Router();
 
-// Multer setup
-// const storage = multer.diskStorage({
-//   destination: (req, file, cb) => cb(null, path.join(__dirname, "../../uploads")),
-//   filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-// });
-// const upload = multer({ storage });
-
+// ===========================
+// Multer setup for Vercel
+// ===========================
 const storage = multer.memoryStorage();
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 2 * 1024 * 1024 }, // Giới hạn 2MB
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(file.mimetype)) {
-      return cb(new Error("Định dạng ảnh không hợp lệ (chỉ chấp nhận jpg, png, webp)"));
-    }
-    cb(null, true);
-  },
-});
+const upload = multer({ storage });
 
 // ===========================
 // Helper: upload buffer to Cloudinary
@@ -54,23 +36,8 @@ const streamUpload = (buffer: Buffer, folder: string, filename: string) => {
 };
 
 // ===========================
-// Middleware: handle Multer errors
-// ===========================
-const handleUpload = (req: Request, res: Response, next: Function) => {
-  upload.single("image")(req, res, (err: any) => {
-    if (err instanceof multer.MulterError) {
-      if (err.code === "LIMIT_FILE_SIZE") {
-        return res.status(400).json({ message: "Ảnh quá lớn, dung lượng tối đa là 2MB" });
-      }
-      return res.status(400).json({ message: `Lỗi upload file: ${err.message}` });
-    } else if (err) {
-      return res.status(400).json({ message: err.message });
-    }
-    next();
-  });
-};
-
 // GET ALL PRODUCTS
+// ===========================
 router.get("/products", authenticateAdmin, async (_req: Request, res: Response) => {
   try {
     const products = await prisma.product.findMany();
@@ -81,7 +48,9 @@ router.get("/products", authenticateAdmin, async (_req: Request, res: Response) 
   }
 });
 
+// ===========================
 // GET PRODUCT BY ID
+// ===========================
 router.get("/products/:id", authenticateAdmin, async (req: Request, res: Response) => {
   try {
     const product = await prisma.product.findUnique({ where: { id: Number(req.params.id) } });
@@ -93,65 +62,6 @@ router.get("/products/:id", authenticateAdmin, async (req: Request, res: Respons
   }
 });
 
-// CREATE PRODUCT
-// router.post("/products", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
-//   try {
-//     const { code, name, description, originalPrice, salePrice } = req.body;
-//     const image = req.file ? `/uploads/${req.file.filename}` : null;
-
-//     const product = await prisma.product.create({
-//       data: {
-//         code,
-//         name,
-//         description,
-//         image,
-//         originalPrice: Number(originalPrice),
-//         salePrice: Number(salePrice) || 0,
-//         onSaleFlag: salePrice != null && Number(salePrice) > 0 && Number(salePrice) < Number(originalPrice),
-//       },
-//     });
-//     res.status(201).json({ product });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-// UPDATE PRODUCT
-// router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req: Request, res: Response) => {
-//   try {
-//     const existing = await prisma.product.findUnique({ where: { id: Number(req.params.id) } });
-//     if (!existing) return res.status(404).json({ message: "Product not found" });
-
-//     const { code, name, description, originalPrice, salePrice } = req.body;
-//     const image = req.file ? `/uploads/${req.file.filename}` : existing.image;
-
-//     const updated = await prisma.product.update({
-//       where: { id: Number(req.params.id) },
-//       data: {
-//         code: code ?? existing.code,
-//         name: name ?? existing.name,
-//         description: description ?? existing.description,
-//         image,
-//         originalPrice: originalPrice ? Number(originalPrice) : existing.originalPrice,
-//         salePrice: salePrice ? Number(salePrice) : existing.salePrice,
-//         onSaleFlag:
-//           (salePrice ? Number(salePrice) : existing.salePrice) > 0 &&
-//           (originalPrice ? Number(originalPrice) : existing.originalPrice) >
-//             (salePrice ? Number(salePrice) : existing.salePrice),
-//       },
-//     });
-//     res.json({ product: updated });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-
-// ===========================
-// Product management
-// ===========================
 // ===========================
 // CREATE PRODUCT
 // ===========================
@@ -169,74 +79,24 @@ router.post("/products", authenticateAdmin, upload.single("image"), async (req, 
       return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
     }
 
-    // Upload file nếu có
     let imageUrl: string | null = null;
-    if (req.file) {
-      if (!req.file.buffer || req.file.buffer.length === 0) {
-        return res.status(400).json({ message: "File is empty" });
-      }
+
+    if (req.file && req.file.buffer) {
       try {
         const ext = path.extname(req.file.originalname);
         const nameOnly = path.basename(req.file.originalname, ext);
         const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
         imageUrl = result.secure_url;
-      } catch (uploadErr) {
+      } catch (uploadErr: any) {
         console.error("❌ Cloudinary upload error:", uploadErr);
-        return res.status(500).json({ message: "Upload file failed", error: uploadErr instanceof Error ? uploadErr.message : uploadErr });
-      }
-    }
 
-    const product = await prisma.product.create({
-      data: {
-        code,
-        name,
-        description,
-        image: imageUrl,
-        originalPrice: Number(originalPrice),
-        salePrice: Number(salePrice) || 0,
-        onSaleFlag:
-          !!salePrice &&
-          Number(salePrice) > 0 &&
-          Number(salePrice) < Number(originalPrice),
-      },
-    });
+        if (uploadErr?.http_code === 400 || uploadErr?.http_code === 413) {
+          return res.status(400).json({ message: "Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn 2MB" });
+        }
 
-    res.status(201).json({ product });
-  } catch (err) {
-    console.error("❌ Error creating product:", err);
-    res.status(500).json({ message: err instanceof Error ? err.message : "Server error" });
-  }
-});
-// ===========================
-// CREATE PRODUCT
-// ===========================
-router.post("/products", authenticateAdmin, handleUpload, async (req, res) => {
-  try {
-    const { code, name, description, originalPrice, salePrice } = req.body;
-
-    if (!code || !name || !originalPrice) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    // Kiểm tra trùng mã
-    const existingCode = await prisma.product.findUnique({ where: { code } });
-    if (existingCode) {
-      return res.status(400).json({ message: "Mã sản phẩm đã tồn tại" });
-    }
-
-    let imageUrl: string | null = null;
-
-    if (req.file) {
-      try {
-        const ext = path.extname(req.file.originalname);
-        const nameOnly = path.basename(req.file.originalname, ext);
-        const result = await streamUpload(req.file.buffer, "coopmini-products", `${Date.now()}-${nameOnly}`);
-        imageUrl = result.secure_url;
-      } catch (uploadErr) {
-        console.error("❌ Cloudinary upload error:", uploadErr);
         return res.status(500).json({
-          message: "Không thể upload ảnh. Vui lòng chọn ảnh nhỏ hơn 2MB.",
-          error: uploadErr instanceof Error ? uploadErr.message : uploadErr,
+          message: "Không thể upload ảnh lên Cloudinary",
+          error: uploadErr.message || "Lỗi không xác định",
         });
       }
     }
@@ -266,7 +126,7 @@ router.post("/products", authenticateAdmin, handleUpload, async (req, res) => {
 // ===========================
 // UPDATE PRODUCT
 // ===========================
-router.put("/products/:id", authenticateAdmin, handleUpload, async (req, res) => {
+router.put("/products/:id", authenticateAdmin, upload.single("image"), async (req, res) => {
   try {
     const productId = Number(req.params.id);
     const existing = await prisma.product.findUnique({ where: { id: productId } });
@@ -280,7 +140,8 @@ router.put("/products/:id", authenticateAdmin, handleUpload, async (req, res) =>
     }
 
     let imageUrl = existing.image;
-    if (req.file) {
+
+    if (req.file && req.file.buffer) {
       try {
         const ext = path.extname(req.file.originalname);
         const nameOnly = path.basename(req.file.originalname, ext);
@@ -292,9 +153,17 @@ router.put("/products/:id", authenticateAdmin, handleUpload, async (req, res) =>
           const publicId = existing.image.split("/").slice(-1)[0]?.split(".")[0];
           if (publicId) await cloudinary.uploader.destroy(`coopmini-products/${publicId}`);
         }
-      } catch (uploadErr) {
+      } catch (uploadErr: any) {
         console.error("❌ Cloudinary upload error:", uploadErr);
-        return res.status(500).json({ message: "Không thể upload ảnh mới" });
+
+        if (uploadErr?.http_code === 400 || uploadErr?.http_code === 413) {
+          return res.status(400).json({ message: "Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn 2MB" });
+        }
+
+        return res.status(500).json({
+          message: "Không thể upload ảnh lên Cloudinary",
+          error: uploadErr.message || "Lỗi không xác định",
+        });
       }
     }
 
@@ -342,11 +211,11 @@ router.delete("/products/:id", authenticateAdmin, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 // ===========================
-// Order management
+// ORDER MANAGEMENT
 // ===========================
-// Get all orders
-router.get("/orders", authenticateAdmin, async (req, res) => {
+router.get("/orders", authenticateAdmin, async (_req, res) => {
   try {
     const orders = await prisma.order.findMany({
       include: {
@@ -367,11 +236,10 @@ router.get("/orders", authenticateAdmin, async (req, res) => {
   }
 });
 
-// Update order status
 router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body; // DELIVERING / DONE
+    const { status } = req.body;
 
     if (!["DELIVERING", "DONE", "CANCELLED"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
@@ -390,4 +258,3 @@ router.patch("/orders/:orderId/status", authenticateAdmin, async (req, res) => {
 });
 
 export default router;
-
