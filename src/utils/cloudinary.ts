@@ -2,7 +2,7 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 
-// Cloudinary config
+// Cloudinary config (dùng biến môi trường)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
   api_key: process.env.CLOUDINARY_API_KEY!,
@@ -10,7 +10,7 @@ cloudinary.config({
   secure: true,
 });
 
-// Multer + Cloudinary Storage
+// Multer + Cloudinary Storage (tự động upload trực tiếp)
 const storage = new CloudinaryStorage({
   cloudinary,
   params: (req, file) => {
@@ -28,6 +28,7 @@ const storage = new CloudinaryStorage({
 // Export Multer upload (giới hạn 5MB)
 export const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
+
 export default cloudinary;
